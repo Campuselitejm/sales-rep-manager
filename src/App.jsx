@@ -655,6 +655,56 @@ function AdminRestocks({setPage}) {
   );
 }
 
+
+// ─── PERIOD DETAIL COMPONENT ─────────────────────────────────
+function PeriodDetail({period, pSales, reps, onClose, onShow}) {
+  const [paid, setPaid] = useState({});
+  const repStats = reps.map(r => {
+    const rs = pSales.filter(s => s.repId === r.repId);
+    return {
+      ...r,
+      value: rs.reduce((s,x) => s+x.totalSaleValue, 0),
+      units: rs.reduce((s,x) => s+x.quantitySold, 0),
+      count: rs.length,
+      commission: rs.reduce((s,x) => s+x.totalSaleValue, 0) * 0.10
+    };
+  }).filter(r => r.count > 0);
+  const totRev = repStats.reduce((s,r) => s+r.value, 0);
+  const totComm = repStats.reduce((s,r) => s+r.commission, 0);
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-between">
+        <div><p className="font-bold text-gray-900">{period.periodName}</p><p className="text-xs text-gray-500">{fmt.date(period.startDate)} – {fmt.date(period.endDate)}</p></div>
+        <Badge label={period.status} type={period.status==="Open"?"success":"warning"}/>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-xs text-emerald-600 font-semibold">Total Revenue</p><p className="text-lg font-bold text-emerald-800">{fmt.currency(totRev)}</p></div>
+        <div className="bg-blue-50 rounded-xl p-3 text-center"><p className="text-xs text-blue-600 font-semibold">Commission (10%)</p><p className="text-lg font-bold text-blue-800">{fmt.currency(totComm)}</p></div>
+      </div>
+      {repStats.length===0 ? <p className="text-sm text-gray-400 text-center py-4">No sales in this period</p> : (
+        <div className="space-y-3">
+          {repStats.map(rep => (
+            <div key={rep.id} className="border border-gray-100 rounded-xl p-3">
+              <div className="flex items-start justify-between mb-2">
+                <div><p className="font-semibold text-sm text-gray-900">{rep.name}</p><p className="text-xs text-gray-400">{rep.repId} · {rep.count} sales · {rep.units} units</p></div>
+                {paid[rep.id] && <Badge label="Paid" type="success"/>}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500">Sales: <span className="font-bold text-gray-800">{fmt.currency(rep.value)}</span></p>
+                  <p className="text-xs text-gray-500">Commission: <span className="font-bold text-emerald-600">{fmt.currency(rep.commission)}</span></p>
+                </div>
+                {!paid[rep.id] && <button onClick={()=>{setPaid(p=>({...p,[rep.id]:true}));onShow("Marked as paid");}} className="px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg hover:bg-emerald-600">Mark Paid</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <button onClick={onClose} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700">Close</button>
+    </div>
+  );
+}
+
 // ─── ADMIN PERIODS ───────────────────────────────────────────
 function AdminPeriods() {
   const {data:periods=[],loading,error,reload} = useAsync(()=>periodsDB.getAll());
@@ -709,33 +759,7 @@ function AdminPeriods() {
         </div>
       </Modal>
       <Modal isOpen={modal?.type==="detail"} onClose={()=>setModal(null)} title="Period Details" size="lg">
-        {modal?.period&&(()=>{
-          const pSales = modal.pSales||[];
-          const repStats = reps.map(r=>{ const rs=pSales.filter(s=>s.repId===r.repId); return{...r,value:rs.reduce((s,x)=>s+x.totalSaleValue,0),units:rs.reduce((s,x)=>s+x.quantitySold,0),count:rs.length,commission:rs.reduce((s,x)=>s+x.totalSaleValue,0)*0.10}; }).filter(r=>r.count>0);
-          const [paid,setPaid] = useState({});
-          const totRev=repStats.reduce((s,r)=>s+r.value,0); const totComm=repStats.reduce((s,r)=>s+r.commission,0);
-          return (
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-between"><div><p className="font-bold text-gray-900">{modal.period.periodName}</p><p className="text-xs text-gray-500">{fmt.date(modal.period.startDate)} – {fmt.date(modal.period.endDate)}</p></div><Badge label={modal.period.status} type={modal.period.status==="Open"?"success":"warning"}/></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-xs text-emerald-600 font-semibold">Total Revenue</p><p className="text-lg font-bold text-emerald-800">{fmt.currency(totRev)}</p></div>
-                <div className="bg-blue-50 rounded-xl p-3 text-center"><p className="text-xs text-blue-600 font-semibold">Commission (10%)</p><p className="text-lg font-bold text-blue-800">{fmt.currency(totComm)}</p></div>
-              </div>
-              {repStats.length===0?<p className="text-sm text-gray-400 text-center py-4">No sales in this period</p>:(
-                <div className="space-y-3">
-                  {repStats.map(rep=>(
-                    <div key={rep.id} className="border border-gray-100 rounded-xl p-3">
-                      <div className="flex items-start justify-between mb-2"><div><p className="font-semibold text-sm text-gray-900">{rep.name}</p><p className="text-xs text-gray-400">{rep.repId} · {rep.count} sales · {rep.units} units</p></div>{paid[rep.id]&&<Badge label="Paid" type="success"/>}</div>
-                      <div className="flex items-center justify-between"><div><p className="text-xs text-gray-500">Sales: <span className="font-bold text-gray-800">{fmt.currency(rep.value)}</span></p><p className="text-xs text-gray-500">Commission: <span className="font-bold text-emerald-600">{fmt.currency(rep.commission)}</span></p></div>
-                      {!paid[rep.id]&&<button onClick={()=>{setPaid(p=>({...p,[rep.id]:true}));show("Marked as paid");}} className="px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg hover:bg-emerald-600">Mark Paid</button>}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button onClick={()=>setModal(null)} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700">Close</button>
-            </div>
-          );
-        })()}
+        {modal?.period&&<PeriodDetail period={modal.period} pSales={modal.pSales||[]} reps={reps} onClose={()=>setModal(null)} onShow={show}/>}
       </Modal>
       <ConfirmModal isOpen={modal?.type==="delete"} onClose={()=>setModal(null)} onConfirm={async()=>{await periodsDB.delete(modal.period.id);show("Period deleted");reload();}} title="Delete Period" message={`Delete "${modal?.period?.periodName}"?`} confirmLabel="Delete" danger/>
       <Toast message={toast.message} visible={toast.visible}/>
