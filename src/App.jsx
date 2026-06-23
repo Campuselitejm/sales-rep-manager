@@ -5,7 +5,23 @@
 // SETUP: Edit src/supabase.js and add your Supabase URL + Key
 // ============================================================
 
-import { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
+import React, { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  componentDidCatch(e) { this.setState({ error: e.message }); }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', {style:{padding:24,fontFamily:'monospace',background:'#fff0f0',color:'#c00',fontSize:14,lineHeight:1.6,borderRadius:8,margin:16}},
+        React.createElement('b', null, '❌ App Error — please screenshot this and share with support:'),
+        React.createElement('br', null),
+        React.createElement('br', null),
+        this.state.error
+      );
+    }
+    return this.props.children;
+  }
+}
 import { repsDB, productsDB, salesDB, restocksDB, periodsDB } from "./supabase.js";
 
 // ─── UTILS ───────────────────────────────────────────────────
@@ -1036,5 +1052,9 @@ function AppContent() {
 }
 
 export default function App() {
-  return <AuthProvider><AppContent/></AuthProvider>;
+  return (
+    <ErrorBoundary>
+      <AuthProvider><AppContent/></AuthProvider>
+    </ErrorBoundary>
+  );
 }
