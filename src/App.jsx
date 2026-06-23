@@ -12,7 +12,7 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(e){this.setState({error:e.message});}
   render(){if(this.state.error)return React.createElement('div',{style:{padding:24,fontFamily:'monospace',background:'#fff0f0',color:'#c00',fontSize:14,borderRadius:8,margin:16}},React.createElement('b',null,'❌ Error: '),this.state.error);return this.props.children;}
 }
-import { repsDB, productsDB, salesDB, restocksDB, periodsDB, restockPeriodsDB, repInventoryDB, commissionsDB } from "./supabase.js";
+import { repsDB, productsDB, salesDB, restocksDB, periodsDB, restockPeriodsDB, repInventoryDB, commissionsDB, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase.js";
 
 // ─── UTILS ───────────────────────────────────────────────────
 const fmt = {
@@ -860,178 +860,175 @@ function AdminReports() {
 }
 
 // ─── ADMIN SETTINGS ──────────────────────────────────────────
-function AdminSettings() {
-  return (
+function AdminSettings(){
+  const[modal,setModal]=useState(null);
+  const[resetting,setResetting]=useState(false);
+  const{toast,show}=useToast();
+
+  const resetAllData = async () => {
+    setResetting(true);
+    try {
+      // Delete in order to respect foreign keys
+      // Sales first (references products, rep_inventory, restock_periods)
+      await fetch(`${SUPABASE_URL}/rest/v1/sales?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Rep commissions
+      await fetch(`${SUPABASE_URL}/rest/v1/rep_commissions?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Rep inventory
+      await fetch(`${SUPABASE_URL}/rest/v1/rep_inventory?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Restock periods
+      await fetch(`${SUPABASE_URL}/rest/v1/restock_periods?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Legacy restocks
+      await fetch(`${SUPABASE_URL}/rest/v1/restocks?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Payment periods
+      await fetch(`${SUPABASE_URL}/rest/v1/payment_periods?id=neq.00000000-0000-0000-0000-000000000000`, {method:'DELETE', headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}});
+      // Reset product stock counters
+      await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.00000000-0000-0000-0000-000000000000`, {
+        method:'PATCH',
+        headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({inventory_quantity:0, total_stock_added:0, total_stock_sold:0, inventory_status:'Sold Out'})
+      });
+      show("All data reset successfully!");
+      setModal(null);
+      setTimeout(()=>window.location.reload(), 1500);
+    } catch(e) {
+      show("Error: "+e.message);
+    }
+    setResetting(false);
+  };
+
+  const resetRepsOnly = async () => {
+    setResetting(true);
+    try {
+      // Delete all sample reps (REP001-REP010) — keeps any reps admin created
+      await fetch(`${SUPABASE_URL}/rest/v1/reps?rep_id=like.REP0*`, {
+        method:'DELETE',
+        headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`}
+      });
+      show("Sample reps removed!");
+      setModal(null);
+      setTimeout(()=>window.location.reload(), 1500);
+    } catch(e) { show("Error: "+e.message); }
+    setResetting(false);
+  };
+
+  return(
     <div className="space-y-5">
       <SHeader title="Settings" subtitle="System configuration"/>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h3 className="font-bold text-gray-900 mb-4">System Information</h3>
         <div className="space-y-3">
-          {[["Application","Sales Rep Inventory Manager"],["Version","2.0.0 — Cloud Edition"],["Database","Supabase (PostgreSQL)"],["Max Reps","10"],["Commission Rate","10% of sales value"],["Data Sync","Real-time across all devices"]].map(([l,v])=>(
+          {[
+            ["Application","Sales Rep Inventory Manager"],
+            ["Version","3.0.0 — Cloud Edition"],
+            ["Database","Supabase (PostgreSQL)"],
+            ["Commission Rate","15% of selling price per restock period"],
+            ["Payout Trigger","When rep sells all allocated stock"],
+            ["Data Sync","Real-time across all devices"],
+          ].map(([l,v])=>(
             <div key={l} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-              <span className="text-sm text-gray-500">{l}</span><span className="text-sm font-semibold text-gray-800">{v}</span>
+              <span className="text-sm text-gray-500">{l}</span>
+              <span className="text-sm font-semibold text-gray-800">{v}</span>
             </div>
           ))}
         </div>
       </div>
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-        <h3 className="font-bold text-blue-900 mb-3">🔑 Change Admin Password</h3>
-        <p className="text-sm text-blue-800">Admin credentials are set in <code className="bg-blue-100 px-1 rounded text-xs">src/App.jsx</code> on the <code className="bg-blue-100 px-1 rounded text-xs">loginAdmin</code> function. Change <code className="bg-blue-100 px-1 rounded text-xs">admin123</code> to your desired password and redeploy.</p>
-      </div>
+
       <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
-        <h3 className="font-bold text-emerald-900 mb-3">✅ Cloud Database Connected</h3>
-        <p className="text-sm text-emerald-800">All data is stored in Supabase and synced in real-time. Any rep logging in from any device will see up-to-date inventory and their own sales history instantly.</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── REP: LOG SALE ───────────────────────────────────────────
-function LogSale({repInfo,onSuccess}) {
-  const {data:repInvItems=[],loading:il,reload:reloadInv} = useAsync(()=>repInventoryDB.getAvailableForRep(repInfo.repId),[repInfo.repId]);
-  const [form,setForm] = useState({repInvId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});
-  const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [confirmation,setConfirmation] = useState(null);
-  const selected = repInvItems.find(i=>i.id===form.repInvId);
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
-
-  const submit = async e => {
-    e.preventDefault(); setError("");
-    if(!form.repInvId){setError("Please select a product");return;}
-    if(!form.quantitySold||Number(form.quantitySold)<=0){setError("Enter a valid quantity");return;}
-    if(selected&&Number(form.quantitySold)>selected.quantityRemaining){setError(`Only ${selected.quantityRemaining} units remaining`);return;}
-    setLoading(true);
-    try {
-      const prod = await productsDB.getById(selected.productId);
-      if(!prod||prod.inventoryQuantity===0){setError("Product sold out");setLoading(false);return;}
-      const saleData = {repId:repInfo.repId,repName:repInfo.name,productId:selected.productId,productName:selected.productName,quantitySold:Number(form.quantitySold),unitPrice:prod.sellingPrice,totalSaleValue:prod.sellingPrice*Number(form.quantitySold),paymentMethod:form.paymentMethod,customerName:form.customerName,customerPhone:form.customerPhone,restockPeriodId:selected.restockPeriodId,repInventoryId:selected.id};
-      const sale = await salesDB.create(saleData);
-      const commission = sale.totalSaleValue * 0.15;
-      const remaining = selected.quantityRemaining - Number(form.quantitySold);
-      setConfirmation({sale,commission,remaining});
-      onSuccess(); reloadInv();
-    } catch(e) { setError("Error: "+e.message); }
-    setLoading(false);
-  };
-
-  if(confirmation) return(
-    <div className="text-center py-8">
-      <div className="w-20 h-20 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-5 shadow-xl shadow-emerald-200"><span className="text-white text-4xl font-bold">✓</span></div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-1">Sale Logged!</h2>
-      <p className="text-gray-500 text-sm mb-6">Saved to cloud instantly</p>
-      <div className="bg-gray-50 rounded-2xl p-5 text-left mb-6 space-y-3">
-        <div className="flex justify-between"><span className="text-sm text-gray-500">Product</span><span className="text-sm font-semibold">{confirmation.sale.productName}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-gray-500">Qty Sold</span><span className="text-sm font-semibold">{confirmation.sale.quantitySold} units</span></div>
-        <div className="flex justify-between"><span className="text-sm text-gray-500">Sale Total</span><span className="text-lg font-bold text-emerald-600">{fmt.currency(confirmation.sale.totalSaleValue)}</span></div>
-        <div className="flex justify-between border-t border-gray-200 pt-3"><span className="text-sm font-semibold text-gray-600">Rep Commission (15%)</span><span className="text-base font-bold text-blue-600">{fmt.currency(confirmation.commission)}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-gray-500">Your Remaining Stock</span><span className={"text-sm font-bold "+(confirmation.remaining===0?"text-red-600":"text-gray-800")}>{confirmation.remaining===0?"⚠️ SOLD OUT — Payout Due!":confirmation.remaining+" units"}</span></div>
-      </div>
-      <button onClick={()=>{setConfirmation(null);setForm({repInvId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});}} className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold rounded-2xl text-lg">Log Another Sale</button>
-    </div>
-  );
-
-  return(
-    <form onSubmit={submit} className="space-y-4">
-      <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 text-white"><p className="text-xs font-semibold opacity-75">Logging sale as</p><p className="text-lg font-bold">{repInfo.name}</p><p className="text-xs opacity-75">{repInfo.repId}</p></div>
-      {error&&<div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">⚠️ {error}</div>}
-      <FF label="Select Product from Your Stock" required>
-        {il?<div className="h-12 bg-gray-50 rounded-xl animate-pulse"/>:(
-          <select className={iCls} value={form.repInvId} onChange={e=>set("repInvId",e.target.value)}>
-            <option value="">Choose product...</option>
-            {repInvItems.map(i=><option key={i.id} value={i.id}>{i.productName} ({i.quantityRemaining} remaining)</option>)}
-          </select>
-        )}
-      </FF>
-      {selected&&(
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1">
-          <div className="flex justify-between items-center"><span className="text-xs text-emerald-700 font-semibold">Your Stock Remaining</span><span className="text-sm font-bold text-emerald-800">{selected.quantityRemaining} units</span></div>
+        <h3 className="font-bold text-emerald-900 mb-2">✅ How Commissions Work</h3>
+        <div className="space-y-1.5 text-sm text-emerald-800">
+          <p>1. Admin restocks a product and allocates units to each rep</p>
+          <p>2. Rep confirms receipt of their allocated stock</p>
+          <p>3. As rep makes sales, 15% commission accumulates</p>
+          <p>4. When rep sells ALL their stock → commission shows <strong>🔴 Due</strong></p>
+          <p>5. Admin goes to Commissions → taps "Mark Paid" → shows <strong>✅ Paid</strong></p>
         </div>
-      )}
-      <FF label="Quantity" required>
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={()=>set("quantitySold",Math.max(1,Number(form.quantitySold)-1))} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex-shrink-0 flex items-center justify-center">−</button>
-          <input className={iCls+" text-center text-lg font-bold"} type="number" min="1" max={selected?.quantityRemaining||999} value={form.quantitySold} onChange={e=>set("quantitySold",e.target.value)}/>
-          <button type="button" onClick={()=>set("quantitySold",Number(form.quantitySold)+1)} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex-shrink-0 flex items-center justify-center">+</button>
-        </div>
-      </FF>
-      <FF label="Payment Method" required>
-        <div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(m=><button key={m} type="button" onClick={()=>set("paymentMethod",m)} className={"py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all "+(form.paymentMethod===m?"border-red-500 bg-red-50 text-red-700":"border-gray-200 bg-white text-gray-700 hover:border-gray-300")}>{m==="Cash"?"💵":m==="Card"?"💳":m==="Bank Transfer"?"🏦":"📱"} {m}</button>)}</div>
-      </FF>
-      <FF label="Customer Name" hint="Optional"><input className={iCls} value={form.customerName} onChange={e=>set("customerName",e.target.value)} placeholder="Customer name"/></FF>
-      <FF label="Customer Phone" hint="Optional"><input className={iCls} type="tel" value={form.customerPhone} onChange={e=>set("customerPhone",e.target.value)} placeholder="+1 876-555-0000"/></FF>
-      <PBtn className="w-full py-4 text-base mt-2" loading={loading} disabled={repInvItems.length===0}>💰 Submit Sale</PBtn>
-      {repInvItems.length===0&&!il&&<p className="text-center text-xs text-gray-500">No stock allocated to you yet. Contact your admin.</p>}
-    </form>
-  );
-}
-
-
-// ─── REP: MY SALES ───────────────────────────────────────────
-function MySales({repInfo}) {
-  const {data:sales=[],loading} = useAsync(()=>salesDB.getByRep(repInfo.repId));
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard title="Total Revenue" value={fmt.currency(sales.reduce((s,x)=>s+x.totalSaleValue,0))} icon="💰" color="red" loading={loading}/>
-        <StatCard title="Units Sold" value={sales.reduce((s,x)=>s+x.quantitySold,0)} icon="📦" color="blue" loading={loading}/>
       </div>
-      {loading?<div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-20 bg-white rounded-2xl border border-gray-100 animate-pulse"/>)}</div>:
-        sales.length===0?<EmptyState icon="💰" title="No sales yet" message="Log your first sale to see it here"/>:(
-          <div className="space-y-3">
-            {sales.map(s=>(
-              <div key={s.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-                <div className="flex items-start justify-between mb-2">
-                  <div><p className="font-bold text-gray-900 text-sm">{s.productName}</p><p className="text-xs text-gray-400">{new Date(s.dateSold).toLocaleString()}</p></div>
-                  <span className="text-base font-bold text-emerald-600">{fmt.currency(s.totalSaleValue)}</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-gray-500">
-                  <span>📦 {s.quantitySold} units</span><span>·</span>
-                  <span>{s.paymentMethod==="Cash"?"💵":s.paymentMethod==="Card"?"💳":s.paymentMethod==="Bank Transfer"?"🏦":"📱"} {s.paymentMethod}</span>
-                  {s.customerName&&<><span>·</span><span>👤 {s.customerName}</span></>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      }
-    </div>
-  );
-}
 
-// ─── REP: MY PERFORMANCE ─────────────────────────────────────
-function MyPerformance({repInfo}){
-  const{data:sales=[],loading}=useAsync(()=>salesDB.getByRep(repInfo.repId));
-  const{data:commissions=[]}=useAsync(()=>commissionsDB.getByRep(repInfo.repId));
-  const totalVal=sales.reduce((s,x)=>s+x.totalSaleValue,0);
-  const totalComm=totalVal*0.15;
-  const byProduct=groupSalesByProduct(sales);
-  const dueComm=commissions.filter(c=>c.status==="Due").reduce((s,c)=>s+c.commissionAmount,0);
-  const paidComm=commissions.filter(c=>c.status==="Paid").reduce((s,c)=>s+c.commissionAmount,0);
-  return(
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard title="All-Time Revenue" value={fmt.currency(totalVal)} icon="💰" color="red" loading={loading}/>
-        <StatCard title="My Commission (15%)" value={fmt.currency(totalComm)} icon="💵" color="blue" loading={loading}/>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard title="Commission Due" value={fmt.currency(dueComm)} icon="🔴" color="orange"/>
-        <StatCard title="Commission Paid" value={fmt.currency(paidComm)} icon="✅" color="green"/>
-      </div>
-      {commissions.length>0&&(
-        <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-          <p className="font-bold text-gray-900 mb-3">Rep Commission by Restock Period</p>
-          <div className="space-y-2">{commissions.map(c=>(
-            <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-              <div><p className="text-sm font-semibold text-gray-900">{c.productName}</p><p className="text-xs text-gray-400">{c.unitsSold} units · 15% rate</p></div>
-              <div className="flex items-center gap-2"><span className="text-sm font-bold text-blue-600">{fmt.currency(c.commissionAmount)}</span><CommissionBadge status={c.status}/></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-red-100 p-5">
+        <h3 className="font-bold text-red-600 mb-4">⚠️ Danger Zone — Reset Data</h3>
+        <div className="space-y-3">
+
+          <div className="flex items-center justify-between p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Remove Sample Reps</p>
+              <p className="text-xs text-gray-500 mt-0.5">Deletes REP001–REP010 dummy reps only. Keeps all other data.</p>
             </div>
-          ))}</div>
+            <button onClick={()=>setModal("reps")} className="px-4 py-2 bg-amber-500 text-white text-sm font-semibold rounded-xl hover:bg-amber-600 ml-4 flex-shrink-0">
+              Remove
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-red-50 border border-red-200 rounded-xl">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Reset All Transactions</p>
+              <p className="text-xs text-gray-500 mt-0.5">Clears all sales, restocks, commissions and resets inventory to zero. Keeps reps and products.</p>
+            </div>
+            <button onClick={()=>setModal("transactions")} className="px-4 py-2 bg-red-500 text-white text-sm font-semibold rounded-xl hover:bg-red-600 ml-4 flex-shrink-0">
+              Reset
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-red-50 border border-red-200 rounded-xl">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Reset Everything</p>
+              <p className="text-xs text-gray-500 mt-0.5">Clears ALL data — sales, restocks, commissions, products. Keeps reps only.</p>
+            </div>
+            <button onClick={()=>setModal("everything")} className="px-4 py-2 bg-red-700 text-white text-sm font-semibold rounded-xl hover:bg-red-800 ml-4 flex-shrink-0">
+              Wipe
+            </button>
+          </div>
+
         </div>
-      )}
-      {byProduct.length>0&&<div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><p className="font-bold text-gray-900 mb-3">Sales by Product</p><BarChart data={byProduct.slice(0,5)} vk="value" lk="name" color="#DC143C"/></div>}
+      </div>
+
+      <ConfirmModal
+        isOpen={modal==="reps"}
+        onClose={()=>setModal(null)}
+        onConfirm={resetRepsOnly}
+        title="Remove Sample Reps"
+        message="This will delete REP001–REP010 (the dummy reps). Any reps you created yourself will stay. Continue?"
+        confirmLabel="Remove Sample Reps"
+        danger
+      />
+      <ConfirmModal
+        isOpen={modal==="transactions"}
+        onClose={()=>setModal(null)}
+        onConfirm={resetAllData}
+        title="Reset All Transactions"
+        message="This will delete ALL sales, restocks, commissions and reset all inventory to zero. Reps and products are kept. This cannot be undone."
+        confirmLabel="Reset All Data"
+        danger
+      />
+      <ConfirmModal
+        isOpen={modal==="everything"}
+        onClose={()=>setModal(null)}
+        onConfirm={async()=>{
+          setResetting(true);
+          try{
+            await fetch(`${SUPABASE_URL}/rest/v1/sales?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/rep_commissions?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/rep_inventory?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/restock_periods?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/restocks?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/payment_periods?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.00000000-0000-0000-0000-000000000000`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`}});
+            show("Everything wiped! Reloading...");
+            setModal(null);
+            setTimeout(()=>window.location.reload(),1500);
+          }catch(e){show("Error: "+e.message);}
+          setResetting(false);
+        }}
+        title="Wipe Everything"
+        message="This deletes ALL products, sales, restocks, commissions and inventory. Reps are kept. This CANNOT be undone. Are you absolutely sure?"
+        confirmLabel="Yes, Wipe Everything"
+        danger
+      />
+
+      <Toast message={toast.message} visible={toast.visible}/>
     </div>
   );
 }
-
 
 
 // ─── ADMIN REP INVENTORY ─────────────────────────────────────
