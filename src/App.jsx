@@ -5,23 +5,7 @@
 // SETUP: Edit src/supabase.js and add your Supabase URL + Key
 // ============================================================
 
-import React, { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
-
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  componentDidCatch(e) { this.setState({ error: e.message }); }
-  render() {
-    if (this.state.error) {
-      return React.createElement('div', {style:{padding:24,fontFamily:'monospace',background:'#fff0f0',color:'#c00',fontSize:14,lineHeight:1.6,borderRadius:8,margin:16}},
-        React.createElement('b', null, '❌ App Error — please screenshot this and share with support:'),
-        React.createElement('br', null),
-        React.createElement('br', null),
-        this.state.error
-      );
-    }
-    return this.props.children;
-  }
-}
+import { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
 import { repsDB, productsDB, salesDB, restocksDB, periodsDB } from "./supabase.js";
 
 // ─── UTILS ───────────────────────────────────────────────────
@@ -222,16 +206,25 @@ function useToast() {
 }
 
 function useAsync(fn, deps=[]) {
-  const [data,setData] = useState(null);
+  const [data,setData] = useState(undefined);
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState(null);
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setData(await fn()); } catch(e) { setError(e.message); }
+    try {
+      const result = await fn();
+      // If result is null/undefined, keep as null so =[] defaults work
+      // If result is an array (most DB calls), ensure it's always an array
+      setData(Array.isArray(result) ? result : (result ?? undefined));
+    } catch(e) {
+      setError(e.message);
+      setData(undefined);
+      console.error('useAsync error:', e.message);
+    }
     setLoading(false);
   }, deps);
   useEffect(() => { load(); }, [load]);
-  return {data,loading,error,reload:load};
+  return {data, loading, error, reload:load};
 }
 
 // ─── LOGIN ───────────────────────────────────────────────────
@@ -1052,9 +1045,5 @@ function AppContent() {
 }
 
 export default function App() {
-  return (
-    <ErrorBoundary>
-      <AuthProvider><AppContent/></AuthProvider>
-    </ErrorBoundary>
-  );
+  return <AuthProvider><AppContent/></AuthProvider>;
 }
