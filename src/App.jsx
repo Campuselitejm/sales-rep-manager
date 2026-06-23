@@ -574,7 +574,6 @@ function AdminProducts() {
     <span className="text-gray-600">{p.totalStockSold}</span>,
     <Badge label={p.inventoryStatus} type={p.inventoryStatus==="Available"?"success":"danger"}/>,
     <div className="flex gap-1">
-      <button onClick={()=>{setModal({type:"restock",product:p});setQty("");}} className="w-7 h-7 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 text-xs flex items-center justify-center" title="Restock">🔄</button>
       <button onClick={()=>setModal({type:"edit",product:p})} className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs flex items-center justify-center" title="Edit">✏️</button>
       <button onClick={()=>setModal({type:"delete",product:p})} className="w-7 h-7 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-xs flex items-center justify-center" title="Delete">🗑️</button>
     </div>
@@ -590,18 +589,7 @@ function AdminProducts() {
       <Modal isOpen={modal?.type==="create"||modal?.type==="edit"} onClose={()=>setModal(null)} title={modal?.type==="edit"?`Edit: ${modal.product?.productName}`:"Add Product"}>
         <ProdForm initial={modal?.product} onSave={async form=>{setSaving(true);try{if(modal?.product?.id){await productsDB.update(modal.product.id,form);show("Product updated");}else{await productsDB.create(form);show("Product added");}setModal(null);reload();}catch(e){show("Error: "+e.message);}setSaving(false);}} onClose={()=>setModal(null)} saving={saving}/>
       </Modal>
-      <Modal isOpen={modal?.type==="restock"} onClose={()=>setModal(null)} title="Restock Product" size="sm">
-        {modal?.product&&(
-          <div className="space-y-4">
-            <div className="bg-gray-50 rounded-xl p-3"><p className="font-semibold text-sm">{modal.product.productName}</p><p className="text-xs text-gray-500 mt-0.5">Current stock: <strong>{modal.product.inventoryQuantity}</strong> units</p></div>
-            <FF label="Quantity to Add" required><input className={inputCls} type="number" min="1" value={qty} onChange={e=>setQty(e.target.value)} placeholder="Enter quantity" autoFocus/></FF>
-            <div className="flex gap-3">
-              <button onClick={()=>setModal(null)} className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700">Cancel</button>
-              <PBtn variant="green" className="flex-1" loading={saving} onClick={async()=>{if(!qty||Number(qty)<=0)return;setSaving(true);try{await productsDB.restock(modal.product.id,Number(qty),"Admin");show(`Added ${qty} units`);setModal(null);reload();}catch(e){show("Error: "+e.message);}setSaving(false);}}>Add Stock</PBtn>
-            </div>
-          </div>
-        )}
-      </Modal>
+      
       <ConfirmModal isOpen={modal?.type==="delete"} onClose={()=>setModal(null)} onConfirm={async()=>{await productsDB.delete(modal.product.id);show("Product deleted");reload();}} title="Delete Product" message={`Delete "${modal?.product?.productName}"?`} confirmLabel="Delete" danger/>
       <Toast message={toast.message} visible={toast.visible}/>
     </div>
@@ -687,29 +675,129 @@ function AdminSales() {
 }
 
 // ─── ADMIN RESTOCKS ──────────────────────────────────────────
-function AdminRestocks({setPage}) {
-  const {data:restocks=[],loading,error} = useAsync(()=>restocksDB.getAll());
-  const rows = restocks.map(r=>[
-    <p className="font-semibold text-sm text-gray-900">{r.productName}</p>,
-    <span className="font-bold text-emerald-600">+{fmt.number(r.quantityAdded)}</span>,
-    <span className="text-sm text-gray-600">{r.adminName}</span>,
-    <span className="text-xs text-gray-500">{fmt.date(r.dateAdded)}</span>,
+function AdminRestocks() {
+  const {data:products=[],reload:reloadProds} = useAsync(()=>productsDB.getAll());
+  const {data:reps=[]} = useAsync(()=>repsDB.getAll());
+  const {data:periods=[],loading,reload} = useAsync(()=>restockPeriodsDB.getAll());
+  const [modal,setModal] = useState(false);
+  const [saving,setSaving] = useState(false);
+  const {toast,show} = useToast();
+  const [rF,setRF] = useState({productId:"",qty:"",costPrice:""});
+  const [alloc,setAlloc] = useState({});
+
+  const activeReps = reps.filter(r=>r.status==="Active");
+  const totalAlloc = Object.values(alloc).reduce((s,v)=>s+Number(v||0),0);
+  const targetQty = Number(rF.qty||0);
+  const allocValid = targetQty>0 && totalAlloc===targetQty;
+
+  const handleRestock = async () => {
+    if(!rF.productId||!rF.qty||!rF.costPrice){show("Fill all fields");return;}
+    if(!allocValid){show(`Allocate exactly ${targetQty} units. Currently ${totalAlloc}.`);return;}
+    setSaving(true);
+    try {
+      const period = await restocksDB.restock(rF.productId, Number(rF.qty), Number(rF.costPrice), "Admin");
+      for(const rep of activeReps){
+        const qty = Number(alloc[rep.id]||0);
+        if(qty>0){
+          await repInventoryDB.create({
+            repId:rep.repId, repName:rep.name,
+            productId:rF.productId, productName:period.productName,
+            restockPeriodId:period.id, quantityAllocated:qty,
+            quantitySold:0, quantityConfirmed:0, confirmed:false
+          });
+          const prod = products.find(p=>p.id===rF.productId);
+          if(prod) await commissionsDB.getOrCreate(rep.repId, rep.name, period.id, period.productName, prod.sellingPrice);
+        }
+      }
+      show("Restock complete! Stock allocated to reps.");
+      setModal(false);
+      setRF({productId:"",qty:"",costPrice:""});
+      setAlloc({});
+      reload();
+      reloadProds();
+    } catch(e) { show("Error: "+e.message); }
+    setSaving(false);
+  };
+
+  const rows = periods.map(p=>[
+    <div><p className="font-semibold text-sm text-gray-900">{p.productName}</p><p className="text-xs text-gray-400">{fmt.date(p.startedAt)}</p></div>,
+    <span className="font-semibold">{fmt.number(p.quantityAdded)}</span>,
+    <span className="text-gray-600">{fmt.currency(p.costPrice)}</span>,
+    <span className="text-gray-600">{fmt.currency(p.sellingPrice)}</span>,
+    <span className="font-semibold text-emerald-600">{fmt.currency((p.sellingPrice-p.costPrice)*p.quantityAdded)}</span>,
+    <Badge label={p.status} type={p.status==="Active"?"success":"default"}/>,
   ]);
-  return (
+
+  return(
     <div className="space-y-5">
-      <SHeader title="Restock History" subtitle={`${restocks.length} events`} action={<button onClick={()=>setPage("products")} className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm font-semibold rounded-xl hover:from-emerald-600 hover:to-emerald-700">🔄 Restock a Product</button>}/>
-      {error&&<ErrorBanner message={error}/>}
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard title="Total Events" value={restocks.length} icon="🔄" color="green" loading={loading}/>
-        <StatCard title="Total Units Added" value={fmt.number(restocks.reduce((s,r)=>s+r.quantityAdded,0))} icon="📦" color="blue" loading={loading}/>
-      </div>
+      <SHeader title="Restocks" subtitle="Restock products and allocate to reps" action={<PBtn onClick={()=>setModal(true)}>🔄 New Restock</PBtn>}/>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <Table headers={["Product","Qty Added","By","Date"]} rows={rows} loading={loading} empty="No restocks yet"/>
+        <Table headers={["Product","Qty","Cost/Unit","Sell Price","Gross Profit","Status"]} rows={rows} loading={loading} empty="No restocks yet. Tap New Restock to add stock and allocate to reps."/>
       </div>
+
+      <Modal isOpen={modal} onClose={()=>setModal(false)} title="Restock & Allocate Stock" size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <FF label="Product" required>
+              <select className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" value={rF.productId} onChange={e=>setRF(f=>({...f,productId:e.target.value}))}>
+                <option value="">Select...</option>
+                {products.map(p=><option key={p.id} value={p.id}>{p.productName}</option>)}
+              </select>
+            </FF>
+            <FF label="Total Qty" required>
+              <input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="number" min="1" value={rF.qty} onChange={e=>setRF(f=>({...f,qty:e.target.value}))} placeholder="0"/>
+            </FF>
+            <FF label="Cost/Unit ($)" required>
+              <input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="number" min="0" step="0.01" value={rF.costPrice} onChange={e=>setRF(f=>({...f,costPrice:e.target.value}))} placeholder="0.00"/>
+            </FF>
+          </div>
+
+          {targetQty>0&&(
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-bold text-gray-900">Allocate {targetQty} units to reps</p>
+                <span className={"text-xs font-bold px-2 py-0.5 rounded-lg "+(allocValid?"bg-emerald-100 text-emerald-700":"bg-amber-100 text-amber-700")}>
+                  {totalAlloc}/{targetQty} allocated
+                </span>
+              </div>
+              <div className="space-y-2">
+                {activeReps.map(rep=>(
+                  <div key={rep.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-gray-900">{rep.name}</p>
+                      <p className="text-xs text-gray-400">{rep.repId}</p>
+                    </div>
+                    <input
+                      type="number" min="0" max={targetQty}
+                      value={alloc[rep.id]||""}
+                      onChange={e=>setAlloc(a=>({...a,[rep.id]:e.target.value}))}
+                      placeholder="0"
+                      className="w-20 px-3 py-2 border border-gray-200 rounded-xl text-sm text-center focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              {!allocValid&&totalAlloc>0&&(
+                <p className="text-xs text-amber-600 mt-2">⚠️ Total must equal exactly {targetQty} units. Currently {totalAlloc}.</p>
+              )}
+              {activeReps.length===0&&(
+                <p className="text-xs text-gray-400 text-center py-4">No active reps found. Add reps first.</p>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <button onClick={()=>setModal(false)} className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700">Cancel</button>
+            <PBtn variant="green" className="flex-1" loading={saving} disabled={!allocValid||!rF.productId} onClick={handleRestock}>
+              ✅ Confirm Restock & Allocate
+            </PBtn>
+          </div>
+        </div>
+      </Modal>
+      <Toast message={toast.message} visible={toast.visible}/>
     </div>
   );
 }
-
 
 // ─── PERIOD DETAIL COMPONENT ─────────────────────────────────
 function PeriodDetail({period, pSales, reps, onClose, onShow}) {
@@ -1132,6 +1220,199 @@ function AdminCommissions(){
         <Table headers={["Rep","Product","Units Sold","Commission","Status","Paid Date","Action"]} rows={rows} loading={loading} empty="No commissions yet."/>
       </div>
       <Toast message={toast.message} visible={toast.visible}/>
+    </div>
+  );
+}
+
+
+// ─── REP: LOG SALE ───────────────────────────────────────────
+function LogSale({repInfo, onSuccess}) {
+  const {data:repInvItems=[], loading:il, reload:reloadInv} = useAsync(()=>repInventoryDB.getAvailableForRep(repInfo.repId), [repInfo.repId]);
+  const [form, setForm] = useState({repInvId:"", quantitySold:1, customerName:"", customerPhone:"", paymentMethod:"Cash"});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmation, setConfirmation] = useState(null);
+  const selected = repInvItems.find(i=>i.id===form.repInvId);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async e => {
+    e.preventDefault(); setError("");
+    if(!form.repInvId){setError("Please select a product");return;}
+    if(!form.quantitySold||Number(form.quantitySold)<=0){setError("Enter a valid quantity");return;}
+    if(selected&&Number(form.quantitySold)>selected.quantityRemaining){setError(`Only ${selected.quantityRemaining} units remaining`);return;}
+    setLoading(true);
+    try {
+      const prod = await productsDB.getById(selected.productId);
+      if(!prod||prod.inventoryQuantity===0){setError("Product sold out");setLoading(false);return;}
+      const sale = await salesDB.create({
+        repId:repInfo.repId, repName:repInfo.name,
+        productId:selected.productId, productName:selected.productName,
+        quantitySold:Number(form.quantitySold), unitPrice:prod.sellingPrice,
+        totalSaleValue:prod.sellingPrice*Number(form.quantitySold),
+        paymentMethod:form.paymentMethod, customerName:form.customerName,
+        customerPhone:form.customerPhone, restockPeriodId:selected.restockPeriodId,
+        repInventoryId:selected.id
+      });
+      const commission = sale.totalSaleValue * 0.15;
+      const remaining = selected.quantityRemaining - Number(form.quantitySold);
+      setConfirmation({sale, commission, remaining});
+      onSuccess(); reloadInv();
+    } catch(e) { setError("Error: "+e.message); }
+    setLoading(false);
+  };
+
+  if(confirmation) return(
+    <div className="text-center py-8">
+      <div className="w-20 h-20 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-5 shadow-xl"><span className="text-white text-4xl font-bold">✓</span></div>
+      <h2 className="text-2xl font-bold text-gray-900 mb-1">Sale Logged!</h2>
+      <p className="text-gray-500 text-sm mb-6">Saved to cloud instantly</p>
+      <div className="bg-gray-50 rounded-2xl p-5 text-left mb-6 space-y-3">
+        <div className="flex justify-between"><span className="text-sm text-gray-500">Product</span><span className="text-sm font-semibold">{confirmation.sale.productName}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-gray-500">Qty Sold</span><span className="text-sm font-semibold">{confirmation.sale.quantitySold} units</span></div>
+        <div className="flex justify-between"><span className="text-sm text-gray-500">Sale Total</span><span className="text-lg font-bold text-emerald-600">{fmt.currency(confirmation.sale.totalSaleValue)}</span></div>
+        <div className="flex justify-between border-t border-gray-200 pt-3">
+          <span className="text-sm font-semibold text-gray-600">Rep Commission (15%)</span>
+          <span className="text-base font-bold text-blue-600">{fmt.currency(confirmation.commission)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-sm text-gray-500">Your Remaining Stock</span>
+          <span className={"text-sm font-bold "+(confirmation.remaining===0?"text-red-600":"text-gray-800")}>
+            {confirmation.remaining===0?"⚠️ SOLD OUT — Payout Due!":confirmation.remaining+" units"}
+          </span>
+        </div>
+      </div>
+      <button onClick={()=>{setConfirmation(null);setForm({repInvId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});}} className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold rounded-2xl text-lg">Log Another Sale</button>
+    </div>
+  );
+
+  return(
+    <form onSubmit={submit} className="space-y-4">
+      <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 text-white">
+        <p className="text-xs font-semibold opacity-75">Logging sale as</p>
+        <p className="text-lg font-bold">{repInfo.name}</p>
+        <p className="text-xs opacity-75">{repInfo.repId}</p>
+      </div>
+      {error&&<div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">⚠️ {error}</div>}
+      <FF label="Select Product from Your Stock" required>
+        {il ? <div className="h-12 bg-gray-50 rounded-xl animate-pulse"/> : (
+          <select className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" value={form.repInvId} onChange={e=>set("repInvId",e.target.value)}>
+            <option value="">Choose product...</option>
+            {repInvItems.map(i=><option key={i.id} value={i.id}>{i.productName} ({i.quantityRemaining} remaining)</option>)}
+          </select>
+        )}
+      </FF>
+      {selected&&(
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+          <div className="flex justify-between items-center"><span className="text-xs text-emerald-700 font-semibold">Your Stock Remaining</span><span className="text-sm font-bold text-emerald-800">{selected.quantityRemaining} units</span></div>
+        </div>
+      )}
+      <FF label="Quantity" required>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={()=>set("quantitySold",Math.max(1,Number(form.quantitySold)-1))} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex items-center justify-center">−</button>
+          <input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-center text-lg font-bold focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="number" min="1" max={selected?.quantityRemaining||999} value={form.quantitySold} onChange={e=>set("quantitySold",e.target.value)}/>
+          <button type="button" onClick={()=>set("quantitySold",Number(form.quantitySold)+1)} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex items-center justify-center">+</button>
+        </div>
+      </FF>
+      <FF label="Payment Method" required>
+        <div className="grid grid-cols-2 gap-2">
+          {PAYMENT_METHODS.map(m=>(
+            <button key={m} type="button" onClick={()=>set("paymentMethod",m)} className={"py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all "+(form.paymentMethod===m?"border-red-500 bg-red-50 text-red-700":"border-gray-200 bg-white text-gray-700 hover:border-gray-300")}>
+              {m==="Cash"?"💵":m==="Card"?"💳":m==="Bank Transfer"?"🏦":"📱"} {m}
+            </button>
+          ))}
+        </div>
+      </FF>
+      <FF label="Customer Name" hint="Optional"><input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" value={form.customerName} onChange={e=>set("customerName",e.target.value)} placeholder="Customer name"/></FF>
+      <FF label="Customer Phone" hint="Optional"><input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="tel" value={form.customerPhone} onChange={e=>set("customerPhone",e.target.value)} placeholder="+1 876-555-0000"/></FF>
+      <PBtn className="w-full py-4 text-base mt-2" loading={loading} disabled={repInvItems.length===0}>💰 Submit Sale</PBtn>
+      {repInvItems.length===0&&!il&&<p className="text-center text-xs text-gray-500">No stock allocated to you yet. Contact your admin.</p>}
+    </form>
+  );
+}
+
+// ─── REP: MY SALES ───────────────────────────────────────────
+function MySales({repInfo}) {
+  const {data:sales=[], loading} = useAsync(()=>salesDB.getByRep(repInfo.repId));
+  const totalVal = sales.reduce((s,x)=>s+x.totalSaleValue, 0);
+  const totalComm = totalVal * 0.15;
+  return(
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard title="Total Revenue" value={fmt.currency(totalVal)} icon="💰" color="red" loading={loading}/>
+        <StatCard title="My Commission" value={fmt.currency(totalComm)} icon="💵" color="blue" loading={loading}/>
+      </div>
+      {loading ? <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-20 bg-white rounded-2xl border border-gray-100 animate-pulse"/>)}</div> :
+        sales.length===0 ? <EmptyState icon="💰" title="No sales yet" message="Log your first sale to see it here"/> : (
+          <div className="space-y-3">
+            {sales.map(s=>(
+              <div key={s.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                <div className="flex items-start justify-between mb-2">
+                  <div><p className="font-bold text-gray-900 text-sm">{s.productName}</p><p className="text-xs text-gray-400">{fmt.dateTime(s.dateSold)}</p></div>
+                  <span className="text-base font-bold text-emerald-600">{fmt.currency(s.totalSaleValue)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span>📦 {s.quantitySold} units</span>
+                    <span>·</span>
+                    <span>{s.paymentMethod==="Cash"?"💵":s.paymentMethod==="Card"?"💳":s.paymentMethod==="Bank Transfer"?"🏦":"📱"} {s.paymentMethod}</span>
+                  </div>
+                  <span className="text-xs font-semibold text-blue-600">Comm: {fmt.currency(s.totalSaleValue*0.15)}</span>
+                </div>
+                {s.customerName&&<p className="text-xs text-gray-400 mt-1">👤 {s.customerName}</p>}
+              </div>
+            ))}
+          </div>
+        )
+      }
+    </div>
+  );
+}
+
+// ─── REP: MY PERFORMANCE ─────────────────────────────────────
+function MyPerformance({repInfo}) {
+  const {data:sales=[], loading} = useAsync(()=>salesDB.getByRep(repInfo.repId));
+  const {data:commissions=[]} = useAsync(()=>commissionsDB.getByRep(repInfo.repId));
+  const totalVal = sales.reduce((s,x)=>s+x.totalSaleValue, 0);
+  const totalComm = totalVal * 0.15;
+  const byProduct = groupSalesByProduct(sales);
+  const dueComm = commissions.filter(c=>c.status==="Due").reduce((s,c)=>s+c.commissionAmount, 0);
+  const paidComm = commissions.filter(c=>c.status==="Paid").reduce((s,c)=>s+c.commissionAmount, 0);
+  return(
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard title="All-Time Revenue" value={fmt.currency(totalVal)} icon="💰" color="red" loading={loading}/>
+        <StatCard title="My Commission (15%)" value={fmt.currency(totalComm)} icon="💵" color="blue" loading={loading}/>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard title="Commission Due" value={fmt.currency(dueComm)} icon="🔴" color="orange"/>
+        <StatCard title="Commission Paid" value={fmt.currency(paidComm)} icon="✅" color="green"/>
+      </div>
+      {commissions.length>0&&(
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+          <p className="font-bold text-gray-900 mb-3">Rep Commission by Restock Period</p>
+          <div className="space-y-2">
+            {commissions.map(c=>(
+              <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{c.productName}</p>
+                  <p className="text-xs text-gray-400">{c.unitsSold} units · 15% rate</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-blue-600">{fmt.currency(c.commissionAmount)}</span>
+                  <CommissionBadge status={c.status}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {byProduct.length>0&&(
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+          <p className="font-bold text-gray-900 mb-3">Sales by Product</p>
+          <BarChart data={byProduct.slice(0,5)} vk="value" lk="name" color="#DC143C"/>
+        </div>
+      )}
+      {sales.length===0&&!loading&&<EmptyState icon="📈" title="No sales yet" message="Your performance stats will appear here after your first sale"/>}
     </div>
   );
 }
