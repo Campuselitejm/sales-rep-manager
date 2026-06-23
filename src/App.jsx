@@ -5,8 +5,14 @@
 // SETUP: Edit src/supabase.js and add your Supabase URL + Key
 // ============================================================
 
-import { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
-import { repsDB, productsDB, salesDB, restocksDB, periodsDB } from "./supabase.js";
+import React, { useState, useEffect, useMemo, createContext, useContext, useCallback } from "react";
+
+class ErrorBoundary extends React.Component {
+  constructor(props){super(props);this.state={error:null};}
+  componentDidCatch(e){this.setState({error:e.message});}
+  render(){if(this.state.error)return React.createElement('div',{style:{padding:24,fontFamily:'monospace',background:'#fff0f0',color:'#c00',fontSize:14,borderRadius:8,margin:16}},React.createElement('b',null,'❌ Error: '),this.state.error);return this.props.children;}
+}
+import { repsDB, productsDB, salesDB, restocksDB, periodsDB, restockPeriodsDB, repInventoryDB, commissionsDB } from "./supabase.js";
 
 // ─── UTILS ───────────────────────────────────────────────────
 const fmt = {
@@ -63,7 +69,7 @@ function AuthProvider({ children }) {
     } catch(e) { return { success:false, message:"Connection error. Check your internet." }; }
   };
   const logout = () => { sessionStorage.removeItem(SESSION_KEY); setUser(null); };
-  return <AuthCtx.Provider value={{user,loading,loginAdmin,loginRep,logout}}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{user,loading,loginAdmin,loginRep,logout,updateSession}}>{children}</AuthCtx.Provider>;
 }
 const useAuth = () => useContext(AuthCtx);
 
@@ -227,6 +233,45 @@ function useAsync(fn, deps=[]) {
   return {data, loading, error, reload:load};
 }
 
+
+function CommissionBadge({status}){
+  if(status==="Paid")return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">✅ Paid</span>;
+  if(status==="Due")return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-200">🔴 Due</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">⏳ Pending</span>;
+}
+
+
+// ─── CHANGE PASSWORD SCREEN ──────────────────────────────────
+function ChangePasswordScreen({repDbId,onDone}){
+  const[form,setForm]=useState({newPw:"",confirmPw:""});
+  const[error,setError]=useState("");const[loading,setLoading]=useState(false);
+  const{updateSession}=useAuth();
+  const submit=async e=>{
+    e.preventDefault();setError("");
+    if(form.newPw.length<6){setError("Password must be at least 6 characters");return;}
+    if(form.newPw!==form.confirmPw){setError("Passwords do not match");return;}
+    setLoading(true);
+    try{await repsDB.changePassword(repDbId,form.newPw);updateSession({mustChangePassword:false});onDone();}
+    catch(e){setError(e.message);}
+    setLoading(false);
+  };
+  return(
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
+      <div className="relative w-full max-w-sm">
+        <div className="text-center mb-8"><div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-amber-500 to-amber-700 rounded-2xl shadow-2xl mb-4"><span className="text-2xl">🔑</span></div><h1 className="text-2xl font-bold text-white">Set Your Password</h1><p className="text-gray-400 text-sm mt-1">Create your own password to continue</p></div>
+        <div className="bg-white/5 backdrop-blur border border-white/10 rounded-3xl p-6 shadow-2xl">
+          {error&&<div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4 text-red-300 text-sm">⚠️ {error}</div>}
+          <form onSubmit={submit} className="space-y-4">
+            <div><label className="block text-sm font-medium text-gray-300 mb-1.5">New Password</label><input type="password" value={form.newPw} onChange={e=>setForm(f=>({...f,newPw:e.target.value}))} placeholder="At least 6 characters" className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" required/></div>
+            <div><label className="block text-sm font-medium text-gray-300 mb-1.5">Confirm Password</label><input type="password" value={form.confirmPw} onChange={e=>setForm(f=>({...f,confirmPw:e.target.value}))} placeholder="Repeat password" className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" required/></div>
+            <button type="submit" disabled={loading} className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-60">{loading?<Spinner size="sm"/>:"🔑  Set Password & Continue"}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGIN ───────────────────────────────────────────────────
 function LoginScreen() {
   const [tab,setTab] = useState("admin");
@@ -266,7 +311,7 @@ function LoginScreen() {
               <button type="submit" disabled={loading} className="w-full py-3.5 bg-gradient-to-r from-red-600 to-red-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-60">{loading?<Spinner size="sm"/>:"🚀  Sign In"}</button>
             </form>
           )}
-          <div className="mt-5 pt-4 border-t border-white/10 text-center"><p className="text-xs text-gray-500">{tab==="admin"?"admin / admin123":"REP001–REP010 / rep123"}</p></div>
+          <div className="mt-5 pt-4 border-t border-white/10 text-center"></div>
         </div>
       </div>
     </div>
@@ -283,7 +328,7 @@ const NAV=[
   {id:"restocks",label:"Restocks",icon:"🔄"},
   {id:"periods",label:"Payment Periods",icon:"📅"},
   {id:"reports",label:"Reports",icon:"📈"},
-  {id:"settings",label:"Settings",icon:"⚙️"},
+  {id:"repinventory",label:"Rep Inventory",icon:"👤"},{id:"commissions",label:"Commissions",icon:"💵"},{id:"settings",label:"Settings",icon:"⚙️"},
 ];
 
 function AdminLayout({page,setPage,children}) {
@@ -495,7 +540,7 @@ function ProdForm({initial,onSave,onClose,saving}) {
   const [errors,setErrors] = useState({});
   const isEdit = !!initial?.id;
   const validate = () => { const e={}; if(!form.productName.trim())e.productName="Required"; if(!form.sku.trim())e.sku="Required"; if(!form.sellingPrice||Number(form.sellingPrice)<=0)e.sellingPrice="Valid price required"; if(!isEdit&&(form.inventoryQuantity===""||Number(form.inventoryQuantity)<0))e.inventoryQuantity="Valid qty required"; setErrors(e); return!Object.keys(e).length; };
-  const submit = e => { e.preventDefault(); if(!validate())return; onSave({...form,sellingPrice:Number(form.sellingPrice),inventoryQuantity:isEdit?initial.inventoryQuantity:Number(form.inventoryQuantity)}); };
+  const submit = e => { e.preventDefault(); if(!validate())return; onSave({...form,sellingPrice:Number(form.sellingPrice),costPrice:Number(form.costPrice||0),inventoryQuantity:isEdit?initial.inventoryQuantity:Number(form.inventoryQuantity)}); };
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -842,80 +887,82 @@ function AdminSettings() {
 
 // ─── REP: LOG SALE ───────────────────────────────────────────
 function LogSale({repInfo,onSuccess}) {
-  const {data:products=[],loading:pl} = useAsync(()=>productsDB.getAvailable());
-  const [form,setForm] = useState({productId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});
+  const {data:repInvItems=[],loading:il,reload:reloadInv} = useAsync(()=>repInventoryDB.getAvailableForRep(repInfo.repId),[repInfo.repId]);
+  const [form,setForm] = useState({repInvId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});
   const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [confirmation,setConfirmation] = useState(null);
-  const selected = products.find(p=>p.id===form.productId);
+  const selected = repInvItems.find(i=>i.id===form.repInvId);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const submit = async e => {
     e.preventDefault(); setError("");
-    if(!form.productId){setError("Please select a product");return;}
+    if(!form.repInvId){setError("Please select a product");return;}
     if(!form.quantitySold||Number(form.quantitySold)<=0){setError("Enter a valid quantity");return;}
+    if(selected&&Number(form.quantitySold)>selected.quantityRemaining){setError(`Only ${selected.quantityRemaining} units remaining`);return;}
     setLoading(true);
     try {
-      const prod = await productsDB.getById(form.productId);
-      if(!prod||prod.inventoryQuantity===0){setError("This product is sold out");setLoading(false);return;}
-      if(Number(form.quantitySold)>prod.inventoryQuantity){setError(`Only ${prod.inventoryQuantity} units available`);setLoading(false);return;}
-      const sale = await salesDB.create({repId:repInfo.repId,repName:repInfo.name,productId:prod.id,productName:prod.productName,quantitySold:Number(form.quantitySold),unitPrice:prod.sellingPrice,totalSaleValue:prod.sellingPrice*Number(form.quantitySold),paymentMethod:form.paymentMethod,customerName:form.customerName,customerPhone:form.customerPhone});
-      const updated = await productsDB.getById(prod.id);
-      setConfirmation({sale,remaining:updated.inventoryQuantity});
-      onSuccess();
-    } catch(e) { setError("Error saving sale: "+e.message); }
+      const prod = await productsDB.getById(selected.productId);
+      if(!prod||prod.inventoryQuantity===0){setError("Product sold out");setLoading(false);return;}
+      const saleData = {repId:repInfo.repId,repName:repInfo.name,productId:selected.productId,productName:selected.productName,quantitySold:Number(form.quantitySold),unitPrice:prod.sellingPrice,totalSaleValue:prod.sellingPrice*Number(form.quantitySold),paymentMethod:form.paymentMethod,customerName:form.customerName,customerPhone:form.customerPhone,restockPeriodId:selected.restockPeriodId,repInventoryId:selected.id};
+      const sale = await salesDB.create(saleData);
+      const commission = sale.totalSaleValue * 0.15;
+      const remaining = selected.quantityRemaining - Number(form.quantitySold);
+      setConfirmation({sale,commission,remaining});
+      onSuccess(); reloadInv();
+    } catch(e) { setError("Error: "+e.message); }
     setLoading(false);
   };
 
-  if(confirmation) return (
+  if(confirmation) return(
     <div className="text-center py-8">
       <div className="w-20 h-20 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-5 shadow-xl shadow-emerald-200"><span className="text-white text-4xl font-bold">✓</span></div>
       <h2 className="text-2xl font-bold text-gray-900 mb-1">Sale Logged!</h2>
-      <p className="text-gray-500 text-sm mb-6">Saved to cloud — synced instantly</p>
+      <p className="text-gray-500 text-sm mb-6">Saved to cloud instantly</p>
       <div className="bg-gray-50 rounded-2xl p-5 text-left mb-6 space-y-3">
         <div className="flex justify-between"><span className="text-sm text-gray-500">Product</span><span className="text-sm font-semibold">{confirmation.sale.productName}</span></div>
         <div className="flex justify-between"><span className="text-sm text-gray-500">Qty Sold</span><span className="text-sm font-semibold">{confirmation.sale.quantitySold} units</span></div>
-        <div className="flex justify-between"><span className="text-sm text-gray-500">Total Value</span><span className="text-lg font-bold text-emerald-600">{fmt.currency(confirmation.sale.totalSaleValue)}</span></div>
-        <div className="flex justify-between border-t border-gray-200 pt-3"><span className="text-sm text-gray-500">Remaining Stock</span><span className={`text-sm font-bold ${confirmation.remaining===0?"text-red-600":"text-gray-800"}`}>{confirmation.remaining===0?"⚠️ SOLD OUT":`${confirmation.remaining} units`}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-gray-500">Sale Total</span><span className="text-lg font-bold text-emerald-600">{fmt.currency(confirmation.sale.totalSaleValue)}</span></div>
+        <div className="flex justify-between border-t border-gray-200 pt-3"><span className="text-sm font-semibold text-gray-600">Rep Commission (15%)</span><span className="text-base font-bold text-blue-600">{fmt.currency(confirmation.commission)}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-gray-500">Your Remaining Stock</span><span className={"text-sm font-bold "+(confirmation.remaining===0?"text-red-600":"text-gray-800")}>{confirmation.remaining===0?"⚠️ SOLD OUT — Payout Due!":confirmation.remaining+" units"}</span></div>
       </div>
-      <button onClick={()=>{setConfirmation(null);setForm({productId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});}} className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold rounded-2xl text-lg">Log Another Sale</button>
+      <button onClick={()=>{setConfirmation(null);setForm({repInvId:"",quantitySold:1,customerName:"",customerPhone:"",paymentMethod:"Cash"});}} className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold rounded-2xl text-lg">Log Another Sale</button>
     </div>
   );
 
-  return (
+  return(
     <form onSubmit={submit} className="space-y-4">
       <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 text-white"><p className="text-xs font-semibold opacity-75">Logging sale as</p><p className="text-lg font-bold">{repInfo.name}</p><p className="text-xs opacity-75">{repInfo.repId}</p></div>
       {error&&<div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">⚠️ {error}</div>}
-      <FF label="Select Product" required>
-        {pl?<div className="h-12 bg-gray-50 rounded-xl animate-pulse"/>:<select className={inputCls} value={form.productId} onChange={e=>set("productId",e.target.value)}>
-          <option value="">Choose a product...</option>
-          {products.map(p=><option key={p.id} value={p.id}>{p.productName} — {fmt.currency(p.sellingPrice)} ({p.inventoryQuantity} left)</option>)}
-        </select>}
+      <FF label="Select Product from Your Stock" required>
+        {il?<div className="h-12 bg-gray-50 rounded-xl animate-pulse"/>:(
+          <select className={iCls} value={form.repInvId} onChange={e=>set("repInvId",e.target.value)}>
+            <option value="">Choose product...</option>
+            {repInvItems.map(i=><option key={i.id} value={i.id}>{i.productName} ({i.quantityRemaining} remaining)</option>)}
+          </select>
+        )}
       </FF>
       {selected&&(
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-          <div className="flex justify-between items-center"><span className="text-xs text-emerald-700 font-semibold">Unit Price</span><span className="text-sm font-bold text-emerald-800">{fmt.currency(selected.sellingPrice)}</span></div>
-          <div className="flex justify-between items-center mt-1"><span className="text-xs text-emerald-700 font-semibold">Available</span><span className="text-sm font-bold text-emerald-800">{selected.inventoryQuantity} units</span></div>
-          {form.quantitySold>0&&<div className="flex justify-between items-center mt-2 pt-2 border-t border-emerald-200"><span className="text-xs text-emerald-700 font-semibold">Sale Total</span><span className="text-base font-bold text-emerald-900">{fmt.currency(selected.sellingPrice*Number(form.quantitySold))}</span></div>}
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1">
+          <div className="flex justify-between items-center"><span className="text-xs text-emerald-700 font-semibold">Your Stock Remaining</span><span className="text-sm font-bold text-emerald-800">{selected.quantityRemaining} units</span></div>
         </div>
       )}
       <FF label="Quantity" required>
         <div className="flex items-center gap-3">
           <button type="button" onClick={()=>set("quantitySold",Math.max(1,Number(form.quantitySold)-1))} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex-shrink-0 flex items-center justify-center">−</button>
-          <input className={`${inputCls} text-center text-lg font-bold`} type="number" min="1" max={selected?.inventoryQuantity||999} value={form.quantitySold} onChange={e=>set("quantitySold",e.target.value)}/>
+          <input className={iCls+" text-center text-lg font-bold"} type="number" min="1" max={selected?.quantityRemaining||999} value={form.quantitySold} onChange={e=>set("quantitySold",e.target.value)}/>
           <button type="button" onClick={()=>set("quantitySold",Number(form.quantitySold)+1)} className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-700 flex-shrink-0 flex items-center justify-center">+</button>
         </div>
       </FF>
       <FF label="Payment Method" required>
-        <div className="grid grid-cols-2 gap-2">
-          {PAYMENT_METHODS.map(m=><button key={m} type="button" onClick={()=>set("paymentMethod",m)} className={`py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all ${form.paymentMethod===m?"border-red-500 bg-red-50 text-red-700":"border-gray-200 bg-white text-gray-700 hover:border-gray-300"}`}>{m==="Cash"?"💵":m==="Card"?"💳":m==="Bank Transfer"?"🏦":"📱"} {m}</button>)}
-        </div>
+        <div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(m=><button key={m} type="button" onClick={()=>set("paymentMethod",m)} className={"py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all "+(form.paymentMethod===m?"border-red-500 bg-red-50 text-red-700":"border-gray-200 bg-white text-gray-700 hover:border-gray-300")}>{m==="Cash"?"💵":m==="Card"?"💳":m==="Bank Transfer"?"🏦":"📱"} {m}</button>)}</div>
       </FF>
-      <FF label="Customer Name" hint="Optional"><input className={inputCls} value={form.customerName} onChange={e=>set("customerName",e.target.value)} placeholder="Customer name"/></FF>
-      <FF label="Customer Phone" hint="Optional"><input className={inputCls} type="tel" value={form.customerPhone} onChange={e=>set("customerPhone",e.target.value)} placeholder="+1 876-555-0000"/></FF>
-      <PBtn className="w-full py-4 text-base mt-2" loading={loading} disabled={products.length===0}>💰 Submit Sale</PBtn>
-      {products.length===0&&!pl&&<p className="text-center text-xs text-gray-500">No products available. Contact your admin.</p>}
+      <FF label="Customer Name" hint="Optional"><input className={iCls} value={form.customerName} onChange={e=>set("customerName",e.target.value)} placeholder="Customer name"/></FF>
+      <FF label="Customer Phone" hint="Optional"><input className={iCls} type="tel" value={form.customerPhone} onChange={e=>set("customerPhone",e.target.value)} placeholder="+1 876-555-0000"/></FF>
+      <PBtn className="w-full py-4 text-base mt-2" loading={loading} disabled={repInvItems.length===0}>💰 Submit Sale</PBtn>
+      {repInvItems.length===0&&!il&&<p className="text-center text-xs text-gray-500">No stock allocated to you yet. Contact your admin.</p>}
     </form>
   );
 }
+
 
 // ─── REP: MY SALES ───────────────────────────────────────────
 function MySales({repInfo}) {
@@ -950,24 +997,40 @@ function MySales({repInfo}) {
 }
 
 // ─── REP: MY PERFORMANCE ─────────────────────────────────────
-function MyPerformance({repInfo}) {
-  const {data:sales=[],loading} = useAsync(()=>salesDB.getByRep(repInfo.repId));
-  const {data:open} = useAsync(()=>periodsDB.getOpen());
-  const periodSales = open ? sales.filter(s=>{ const d=new Date(s.dateSold); return d>=new Date(open.startDate)&&d<=new Date(open.endDate+"T23:59:59Z"); }) : [];
-  const byProduct = groupSalesByProduct(sales);
-  const methods = PAYMENT_METHODS.map(m=>({m,count:sales.filter(s=>s.paymentMethod===m).length})).filter(x=>x.count>0);
-  return (
+function MyPerformance({repInfo}){
+  const{data:sales=[],loading}=useAsync(()=>salesDB.getByRep(repInfo.repId));
+  const{data:commissions=[]}=useAsync(()=>commissionsDB.getByRep(repInfo.repId));
+  const totalVal=sales.reduce((s,x)=>s+x.totalSaleValue,0);
+  const totalComm=totalVal*0.15;
+  const byProduct=groupSalesByProduct(sales);
+  const dueComm=commissions.filter(c=>c.status==="Due").reduce((s,c)=>s+c.commissionAmount,0);
+  const paidComm=commissions.filter(c=>c.status==="Paid").reduce((s,c)=>s+c.commissionAmount,0);
+  return(
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <StatCard title="All-Time Revenue" value={fmt.currency(sales.reduce((s,x)=>s+x.totalSaleValue,0))} icon="💰" color="red" loading={loading}/>
-        <StatCard title="All-Time Units" value={sales.reduce((s,x)=>s+x.quantitySold,0)} icon="📦" color="blue" loading={loading}/>
+        <StatCard title="All-Time Revenue" value={fmt.currency(totalVal)} icon="💰" color="red" loading={loading}/>
+        <StatCard title="My Commission (15%)" value={fmt.currency(totalComm)} icon="💵" color="blue" loading={loading}/>
       </div>
-      {open&&<div className="bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-2xl p-4 text-white"><p className="text-xs font-semibold opacity-75 mb-2">📅 {open.periodName}</p><div className="grid grid-cols-2 gap-3"><div><p className="text-xs opacity-75">Period Revenue</p><p className="text-lg font-bold">{fmt.currency(periodSales.reduce((s,x)=>s+x.totalSaleValue,0))}</p></div><div><p className="text-xs opacity-75">Period Units</p><p className="text-lg font-bold">{periodSales.reduce((s,x)=>s+x.quantitySold,0)}</p></div></div></div>}
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard title="Commission Due" value={fmt.currency(dueComm)} icon="🔴" color="orange"/>
+        <StatCard title="Commission Paid" value={fmt.currency(paidComm)} icon="✅" color="green"/>
+      </div>
+      {commissions.length>0&&(
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+          <p className="font-bold text-gray-900 mb-3">Rep Commission by Restock Period</p>
+          <div className="space-y-2">{commissions.map(c=>(
+            <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+              <div><p className="text-sm font-semibold text-gray-900">{c.productName}</p><p className="text-xs text-gray-400">{c.unitsSold} units · 15% rate</p></div>
+              <div className="flex items-center gap-2"><span className="text-sm font-bold text-blue-600">{fmt.currency(c.commissionAmount)}</span><CommissionBadge status={c.status}/></div>
+            </div>
+          ))}</div>
+        </div>
+      )}
       {byProduct.length>0&&<div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><p className="font-bold text-gray-900 mb-3">Sales by Product</p><BarChart data={byProduct.slice(0,5)} vk="value" lk="name" color="#DC143C"/></div>}
-      {methods.length>0&&<div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><p className="font-bold text-gray-900 mb-3">Payment Methods</p><div className="space-y-2">{methods.map(x=><div key={x.m} className="flex items-center justify-between text-sm"><span className="text-gray-600">{x.m}</span><span className="font-bold text-gray-900">{x.count} sale{x.count!==1?"s":""}</span></div>)}</div></div>}
     </div>
   );
 }
+
 
 // ─── REP DASHBOARD ───────────────────────────────────────────
 function RepDashboard() {
@@ -1001,8 +1064,12 @@ function RepDashboard() {
             </div>
             <button onClick={()=>setScreen("log-sale")} className="w-full py-5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-2xl font-bold text-xl shadow-lg shadow-red-200 transition-all flex items-center justify-center gap-3"><span className="text-2xl">💰</span>Log a Sale</button>
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={()=>setScreen("my-sales")} className="w-full py-6 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">📋</span><span className="text-sm">My Sales</span></button>
-              <button onClick={()=>setScreen("my-performance")} className="w-full py-6 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">📈</span><span className="text-sm">Performance</span></button>
+              <button onClick={()=>setScreen("my-sales")} className="w-full py-5 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">📋</span><span className="text-sm">My Sales</span></button>
+              <button onClick={()=>setScreen("my-performance")} className="w-full py-5 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">📈</span><span className="text-sm">Performance</span></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={()=>setScreen("my-inventory")} className="w-full py-5 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">📦</span><span className="text-sm">My Inventory</span></button>
+              <button onClick={()=>setScreen("change-password")} className="w-full py-5 bg-white border-2 border-gray-100 hover:border-gray-200 rounded-2xl font-bold text-gray-800 shadow-sm flex flex-col items-center gap-2"><span className="text-3xl">🔑</span><span className="text-sm">Password</span></button>
             </div>
             <button onClick={logout} className="w-full py-4 border-2 border-gray-200 hover:border-red-200 hover:bg-red-50 rounded-2xl font-semibold text-gray-600 hover:text-red-600 transition-all flex items-center justify-center gap-2"><span>🚪</span>Sign Out</button>
           </div>
@@ -1010,6 +1077,8 @@ function RepDashboard() {
         {screen==="log-sale"&&<LogSale key={salesKey} repInfo={repInfo} onSuccess={()=>setSalesKey(k=>k+1)}/>}
         {screen==="my-sales"&&<MySales key={salesKey} repInfo={repInfo}/>}
         {screen==="my-performance"&&<MyPerformance repInfo={repInfo}/>}
+        {screen==="my-inventory"&&<MyInventory key={salesKey} repInfo={repInfo} onRefresh={()=>setSalesKey(k=>k+1)}/>}
+        {screen==="change-password"&&<RepChangePassword repInfo={repInfo} onDone={()=>setScreen("home")}/>}
       </main>
     </div>
   );
@@ -1034,8 +1103,10 @@ function AppContent() {
     reps:<AdminReps/>,
     products:<AdminProducts/>,
     inventory:<AdminInventory/>,
+    repinventory:<AdminRepInventory/>,
     sales:<AdminSales/>,
     restocks:<AdminRestocks setPage={setAdminPage}/>,
+    commissions:<AdminCommissions/>,
     periods:<AdminPeriods/>,
     reports:<AdminReports/>,
     settings:<AdminSettings/>,
@@ -1045,5 +1116,5 @@ function AppContent() {
 }
 
 export default function App() {
-  return <AuthProvider><AppContent/></AuthProvider>;
+  return <ErrorBoundary><AuthProvider><AppContent/></AuthProvider></ErrorBoundary>;
 }
