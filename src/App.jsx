@@ -1033,6 +1033,208 @@ function MyPerformance({repInfo}){
 }
 
 
+
+// ─── ADMIN REP INVENTORY ─────────────────────────────────────
+function AdminRepInventory(){
+  const{data:repInv=[],loading,reload}=useAsync(()=>repInventoryDB.getAll());
+  const{data:reps=[]}=useAsync(()=>repsDB.getAll());
+  const[filterRep,setFilterRep]=useState("");
+  const[modal,setModal]=useState(null);
+  const[saving,setSaving]=useState(false);
+  const{toast,show}=useToast();
+  const[rF,setRF]=useState({targetRepId:"",qty:""});
+  const activeReps=reps.filter(r=>r.status==="Active");
+  const filtered=filterRep?repInv.filter(i=>i.repId===filterRep):repInv;
+  const rows=filtered.map(inv=>[
+    <div><p className="font-semibold text-sm text-gray-900">{inv.repName}</p><p className="text-xs text-gray-400">{inv.repId}</p></div>,
+    <span className="text-sm">{inv.productName}</span>,
+    <span className="font-semibold">{inv.quantityAllocated}</span>,
+    <span className="text-emerald-600 font-semibold">{inv.quantitySold}</span>,
+    <span className={`font-bold ${inv.quantityRemaining===0?"text-red-600":inv.quantityRemaining<=3?"text-amber-600":"text-gray-900"}`}>{inv.quantityRemaining}</span>,
+    inv.confirmed?<Badge label="Confirmed" type="success"/>:<Badge label="Pending" type="warning"/>,
+    <div>{inv.quantityRemaining>0&&<button onClick={()=>{setModal({inv});setRF({targetRepId:"",qty:""});}} className="px-2 py-1 rounded-lg bg-blue-50 text-blue-600 text-xs font-semibold">Reassign</button>}</div>
+  ]);
+  return(
+    <div className="space-y-5">
+      <SHeader title="Rep Inventory" subtitle="Per-rep stock allocation"/>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="mb-4">
+          <select className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" value={filterRep} onChange={e=>setFilterRep(e.target.value)}>
+            <option value="">All Reps</option>
+            {activeReps.map(r=><option key={r.id} value={r.repId}>{r.name} ({r.repId})</option>)}
+          </select>
+        </div>
+        <Table headers={["Rep","Product","Allocated","Sold","Remaining","Confirmed","Actions"]} rows={rows} loading={loading} empty="No inventory allocated yet. Use Restocks to allocate stock."/>
+      </div>
+      <Modal isOpen={!!modal?.inv} onClose={()=>setModal(null)} title="Reassign Stock" size="sm">
+        {modal?.inv&&(
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-sm font-semibold">{modal.inv.repName} — {modal.inv.productName}</p>
+              <p className="text-xs text-gray-500">Available: <strong>{modal.inv.quantityRemaining}</strong> units</p>
+            </div>
+            <FF label="Transfer To" required>
+              <select className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" value={rF.targetRepId} onChange={e=>setRF(f=>({...f,targetRepId:e.target.value}))}>
+                <option value="">Select rep...</option>
+                {activeReps.filter(r=>r.repId!==modal.inv.repId).map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </FF>
+            <FF label="Quantity to Transfer" required>
+              <input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="number" min="1" max={modal.inv.quantityRemaining} value={rF.qty} onChange={e=>setRF(f=>({...f,qty:e.target.value}))} placeholder="0"/>
+            </FF>
+            <div className="flex gap-3">
+              <button onClick={()=>setModal(null)} className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700">Cancel</button>
+              <PBtn className="flex-1" loading={saving} onClick={async()=>{
+                if(!rF.targetRepId||!rF.qty){show("Fill all fields");return;}
+                setSaving(true);
+                try{
+                  const tr=activeReps.find(r=>r.id===rF.targetRepId);
+                  await repInventoryDB.reassign(modal.inv.id,tr.repId,tr.name,Number(rF.qty));
+                  show("Stock reassigned!");setModal(null);reload();
+                }catch(e){show("Error: "+e.message);}
+                setSaving(false);
+              }}>Transfer</PBtn>
+            </div>
+          </div>
+        )}
+      </Modal>
+      <Toast message={toast.message} visible={toast.visible}/>
+    </div>
+  );
+}
+
+// ─── ADMIN COMMISSIONS ───────────────────────────────────────
+function AdminCommissions(){
+  const{data:commissions=[],loading,reload}=useAsync(()=>commissionsDB.getAll());
+  const{toast,show}=useToast();
+  const[filter,setFilter]=useState("All");
+  const filtered=filter==="All"?commissions:commissions.filter(c=>c.status===filter);
+  const totalDue=commissions.filter(c=>c.status==="Due").reduce((s,c)=>s+c.commissionAmount,0);
+  const totalPaid=commissions.filter(c=>c.status==="Paid").reduce((s,c)=>s+c.commissionAmount,0);
+  const rows=filtered.map(c=>[
+    <div><p className="font-semibold text-sm text-gray-900">{c.repName}</p><p className="text-xs text-gray-400">{c.repId}</p></div>,
+    <span className="text-sm">{c.productName}</span>,
+    <span className="font-semibold">{c.unitsSold}</span>,
+    <span className="font-bold text-emerald-600">{fmt.currency(c.commissionAmount)}</span>,
+    <CommissionBadge status={c.status}/>,
+    c.paidAt?<span className="text-xs text-gray-500">{fmt.date(c.paidAt)}</span>:<span className="text-xs text-gray-400">—</span>,
+    c.status==="Due"?<button onClick={async()=>{await commissionsDB.markPaid(c.id,"Admin");show("Paid: "+c.repName);reload();}} className="px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg hover:bg-emerald-600">Mark Paid</button>:<span/>
+  ]);
+  return(
+    <div className="space-y-5">
+      <SHeader title="Commissions" subtitle="15% of sales per rep per restock period"/>
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard title="Commission Due" value={fmt.currency(totalDue)} icon="🔴" color="red" loading={loading}/>
+        <StatCard title="Commission Paid" value={fmt.currency(totalPaid)} icon="✅" color="green" loading={loading}/>
+        <StatCard title="Pending" value={commissions.filter(c=>c.status==="Pending").length} icon="⏳" color="orange" loading={loading}/>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {["All","Pending","Due","Paid"].map(f=><button key={f} onClick={()=>setFilter(f)} className={"px-4 py-2 rounded-xl text-sm font-semibold transition-all "+(filter===f?"bg-red-600 text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200")}>{f}</button>)}
+        </div>
+        <Table headers={["Rep","Product","Units Sold","Commission","Status","Paid Date","Action"]} rows={rows} loading={loading} empty="No commissions yet."/>
+      </div>
+      <Toast message={toast.message} visible={toast.visible}/>
+    </div>
+  );
+}
+
+// ─── REP: MY INVENTORY ───────────────────────────────────────
+function MyInventory({repInfo,onRefresh}){
+  const{data:repInv=[],loading,reload}=useAsync(()=>repInventoryDB.getByRep(repInfo.repId),[repInfo.repId]);
+  const{toast,show}=useToast();
+  const[saving,setSaving]=useState(null);
+  const unconfirmed=repInv.filter(i=>!i.confirmed);
+  const confirmed=repInv.filter(i=>i.confirmed);
+  return(
+    <div className="space-y-4">
+      {unconfirmed.length>0&&(
+        <div>
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-3">
+            <p className="text-sm font-bold text-amber-800">📦 {unconfirmed.length} stock allocation{unconfirmed.length>1?"s":""} to confirm</p>
+            <p className="text-xs text-amber-600 mt-0.5">Please confirm receipt of your allocated stock</p>
+          </div>
+          <div className="space-y-3">
+            {unconfirmed.map(inv=>(
+              <div key={inv.id} className="bg-white rounded-2xl border border-amber-200 p-4 shadow-sm">
+                <div className="flex items-start justify-between mb-3">
+                  <div><p className="font-bold text-gray-900">{inv.productName}</p><p className="text-xs text-gray-400">Allocated: <strong>{inv.quantityAllocated}</strong> units</p></div>
+                  <Badge label="Pending" type="warning"/>
+                </div>
+                <PBtn variant="green" className="w-full" loading={saving===inv.id} onClick={async()=>{
+                  setSaving(inv.id);
+                  try{await repInventoryDB.confirmReceipt(inv.id,inv.quantityAllocated);show("Stock confirmed!");reload();if(onRefresh)onRefresh();}
+                  catch(e){show("Error: "+e.message);}
+                  setSaving(null);
+                }}>✅ Confirm Receipt of {inv.quantityAllocated} units</PBtn>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {confirmed.length>0&&(
+        <div>
+          <p className="text-sm font-bold text-gray-700 mb-2">My Active Stock</p>
+          <div className="space-y-3">
+            {confirmed.map(inv=>(
+              <div key={inv.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                <div className="flex items-start justify-between mb-2">
+                  <p className="font-bold text-gray-900">{inv.productName}</p>
+                  <span className={"text-sm font-bold "+(inv.quantityRemaining===0?"text-red-600":"text-emerald-600")}>{inv.quantityRemaining===0?"Sold Out":inv.quantityRemaining+" remaining"}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-gray-50 rounded-xl p-2"><p className="text-xs text-gray-400">Allocated</p><p className="text-sm font-bold">{inv.quantityAllocated}</p></div>
+                  <div className="bg-emerald-50 rounded-xl p-2"><p className="text-xs text-gray-400">Sold</p><p className="text-sm font-bold text-emerald-600">{inv.quantitySold}</p></div>
+                  <div className={"rounded-xl p-2 "+(inv.quantityRemaining===0?"bg-red-50":"bg-blue-50")}><p className="text-xs text-gray-400">Remaining</p><p className={"text-sm font-bold "+(inv.quantityRemaining===0?"text-red-600":"text-blue-600")}>{inv.quantityRemaining}</p></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {repInv.length===0&&!loading&&<EmptyState icon="📦" title="No stock allocated" message="Your admin will allocate stock after a restock"/>}
+      <Toast message={toast.message} visible={toast.visible}/>
+    </div>
+  );
+}
+
+// ─── REP: CHANGE PASSWORD ────────────────────────────────────
+function RepChangePassword({repInfo,onDone}){
+  const[form,setForm]=useState({current:"",newPw:"",confirmPw:""});
+  const[error,setError]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[success,setSuccess]=useState(false);
+  const submit=async e=>{
+    e.preventDefault();setError("");
+    if(form.newPw.length<6){setError("New password must be at least 6 characters");return;}
+    if(form.newPw!==form.confirmPw){setError("Passwords do not match");return;}
+    setLoading(true);
+    try{
+      const rep=await repsDB.getById(repInfo.id);
+      if(rep.password!==form.current){setError("Current password is incorrect");setLoading(false);return;}
+      await repsDB.changePassword(repInfo.id,form.newPw);
+      setSuccess(true);setTimeout(onDone,2000);
+    }catch(e){setError(e.message);}
+    setLoading(false);
+  };
+  if(success)return(
+    <div className="text-center py-8">
+      <div className="text-5xl mb-4">✅</div>
+      <p className="font-bold text-gray-900">Password Changed!</p>
+      <p className="text-sm text-gray-500 mt-1">Returning to dashboard...</p>
+    </div>
+  );
+  return(
+    <form onSubmit={submit} className="space-y-4">
+      <FF label="Current Password" required><input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="password" value={form.current} onChange={e=>setForm(f=>({...f,current:e.target.value}))} placeholder="Your current password"/></FF>
+      <FF label="New Password" required><input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="password" value={form.newPw} onChange={e=>setForm(f=>({...f,newPw:e.target.value}))} placeholder="At least 6 characters"/></FF>
+      <FF label="Confirm New Password" required><input className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white" type="password" value={form.confirmPw} onChange={e=>setForm(f=>({...f,confirmPw:e.target.value}))} placeholder="Repeat new password"/></FF>
+      {error&&<p className="text-sm text-red-600">⚠️ {error}</p>}
+      <PBtn className="w-full" loading={loading}>🔑 Change Password</PBtn>
+    </form>
+  );
+}
+
 // ─── REP DASHBOARD ───────────────────────────────────────────
 function RepDashboard() {
   const {user,logout} = useAuth();
