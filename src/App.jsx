@@ -49,7 +49,7 @@ function AuthProvider({ children }) {
     setLoading(false);
   }, []);
   const loginAdmin = (u, p) => {
-    if(u==="admin"&&p==="admin123") { const s={type:"admin",name:"Admin",id:"admin"}; sessionStorage.setItem(SESSION_KEY,JSON.stringify(s)); setUser(s); return{success:true}; }
+    if(u==="QKadmin"&&p==="Thirteen131987!!") { const s={type:"admin",name:"Admin",id:"admin"}; sessionStorage.setItem(SESSION_KEY,JSON.stringify(s)); setUser(s); return{success:true}; }
     return { success:false, message:"Invalid admin credentials." };
   };
   const loginRep = async (repId, pw) => {
