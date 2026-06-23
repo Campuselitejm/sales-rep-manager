@@ -19,6 +19,7 @@ const fmt = {
   currency: n => `$${Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`,
   number: n => Number(n||0).toLocaleString("en-US"),
   date: d => { if(!d)return"—"; return new Date(d).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"}); },
+  dateTime: d => { if(!d)return"—"; return new Date(d).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); },
 };
 const PAYMENT_METHODS = ["Cash","Card","Bank Transfer","Other"];
 const PRODUCT_CATEGORIES = ["Electronics","Tools","Furniture","Clothing","Food & Beverage","Other"];
@@ -809,7 +810,7 @@ function PeriodDetail({period, pSales, reps, onClose, onShow}) {
       value: rs.reduce((s,x) => s+x.totalSaleValue, 0),
       units: rs.reduce((s,x) => s+x.quantitySold, 0),
       count: rs.length,
-      commission: rs.reduce((s,x) => s+x.totalSaleValue, 0) * 0.10
+      commission: rs.reduce((s,x) => s+x.totalSaleValue, 0) * 0.15
     };
   }).filter(r => r.count > 0);
   const totRev = repStats.reduce((s,r) => s+r.value, 0);
@@ -822,7 +823,7 @@ function PeriodDetail({period, pSales, reps, onClose, onShow}) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-xs text-emerald-600 font-semibold">Total Revenue</p><p className="text-lg font-bold text-emerald-800">{fmt.currency(totRev)}</p></div>
-        <div className="bg-blue-50 rounded-xl p-3 text-center"><p className="text-xs text-blue-600 font-semibold">Commission (10%)</p><p className="text-lg font-bold text-blue-800">{fmt.currency(totComm)}</p></div>
+        <div className="bg-blue-50 rounded-xl p-3 text-center"><p className="text-xs text-blue-600 font-semibold">Commission (15%)</p><p className="text-lg font-bold text-blue-800">{fmt.currency(totComm)}</p></div>
       </div>
       {repStats.length===0 ? <p className="text-sm text-gray-400 text-center py-4">No sales in this period</p> : (
         <div className="space-y-3">
@@ -835,7 +836,7 @@ function PeriodDetail({period, pSales, reps, onClose, onShow}) {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs text-gray-500">Sales: <span className="font-bold text-gray-800">{fmt.currency(rep.value)}</span></p>
-                  <p className="text-xs text-gray-500">Commission: <span className="font-bold text-emerald-600">{fmt.currency(rep.commission)}</span></p>
+                  <p className="text-xs text-gray-500">Commission (15%): <span className="font-bold text-emerald-600">{fmt.currency(rep.commission)}</span></p>
                 </div>
                 {!paid[rep.id] && <button onClick={()=>{setPaid(p=>({...p,[rep.id]:true}));onShow("Marked as paid");}} className="px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg hover:bg-emerald-600">Mark Paid</button>}
               </div>
