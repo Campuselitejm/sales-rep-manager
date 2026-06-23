@@ -64,11 +64,12 @@ function AuthProvider({ children }) {
       if(!rep) return { success:false, message:"Rep ID not found." };
       if(rep.status==="Inactive") return { success:false, message:"Account inactive. Contact admin." };
       if(rep.password!==pw) return { success:false, message:"Incorrect password." };
-      const s = { type:"rep", name:rep.name, id:rep.id, repId:rep.repId };
+      const s = { type:"rep", name:rep.name, id:rep.id, repId:rep.repId, mustChangePassword:rep.mustChangePassword||false };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); setUser(s); return { success:true };
     } catch(e) { return { success:false, message:"Connection error. Check your internet." }; }
   };
   const logout = () => { sessionStorage.removeItem(SESSION_KEY); setUser(null); };
+  const updateSession = updates => { const s={...user,...updates}; sessionStorage.setItem(SESSION_KEY,JSON.stringify(s)); setUser(s); };
   return <AuthCtx.Provider value={{user,loading,loginAdmin,loginRep,logout,updateSession}}>{children}</AuthCtx.Provider>;
 }
 const useAuth = () => useContext(AuthCtx);
